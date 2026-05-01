@@ -5,6 +5,7 @@ INSTALL_DIR ?= /opt/$(APP_NAME)
 ENV_FILE ?= /etc/$(APP_NAME).env
 PYTHON ?= python3
 VENV := $(INSTALL_DIR)/.venv
+LOCAL_VENV := .venv
 SIGNAL_API_IMAGE ?= docker.io/bbernhard/signal-cli-rest-api:latest
 
 .DEFAULT_GOAL := help
@@ -19,7 +20,9 @@ dependencies: ## Install/check production dependencies: podman, ffmpeg, Python v
 	for cmd in podman ffmpeg curl rsync systemctl $(PYTHON); do \
 		command -v $$cmd >/dev/null 2>&1 || missing="$$missing $$cmd"; \
 	done; \
-	if ! $(PYTHON) -m venv --help >/dev/null 2>&1; then missing="$$missing python3-venv"; fi; \
+	tmpdir=$$(mktemp -d); \
+	if ! $(PYTHON) -m venv "$$tmpdir/venv" >/dev/null 2>&1; then missing="$$missing python3-venv"; fi; \
+	rm -rf "$$tmpdir"; \
 	if [ -n "$$missing" ]; then \
 		if command -v apt-get >/dev/null 2>&1; then \
 			echo "Installing missing dependencies:$$missing"; \
@@ -35,9 +38,14 @@ dependencies: ## Install/check production dependencies: podman, ffmpeg, Python v
 	fi
 
 build: ## Build/install Python artifacts and pull container images on this host.
-	$(PYTHON) -m venv .venv
-	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install -r requirements-dev.txt
+	@if [ -d "$(LOCAL_VENV)" ] && [ ! -x "$(LOCAL_VENV)/bin/python" ]; then \
+		echo "Removing incomplete $(LOCAL_VENV)"; \
+		rm -rf "$(LOCAL_VENV)"; \
+	fi
+	$(PYTHON) -m venv $(LOCAL_VENV)
+	$(LOCAL_VENV)/bin/python -m ensurepip --upgrade
+	$(LOCAL_VENV)/bin/python -m pip install --upgrade pip
+	$(LOCAL_VENV)/bin/python -m pip install -r requirements-dev.txt
 	podman pull $(SIGNAL_API_IMAGE)
 
 install: dependencies ## Install app under /opt, env under /etc, and systemd units for autostart.
@@ -51,9 +59,14 @@ install: dependencies ## Install app under /opt, env under /etc, and systemd uni
 		--exclude '.pytest_cache' \
 		--exclude 'bot.log' \
 		./ $(INSTALL_DIR)/
+	@if [ -d "$(VENV)" ] && [ ! -x "$(VENV)/bin/python" ]; then \
+		echo "Removing incomplete $(VENV)"; \
+		sudo rm -rf "$(VENV)"; \
+	fi
 	sudo $(PYTHON) -m venv $(VENV)
-	sudo $(VENV)/bin/pip install --upgrade pip
-	sudo $(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements.txt
+	sudo $(VENV)/bin/python -m ensurepip --upgrade
+	sudo $(VENV)/bin/python -m pip install --upgrade pip
+	sudo $(VENV)/bin/python -m pip install -r $(INSTALL_DIR)/requirements.txt
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 		if [ -f ".env" ]; then \
 			echo "Creating $(ENV_FILE) from local .env"; \
