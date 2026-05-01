@@ -1,0 +1,21 @@
+[Unit]
+Description=Signal CLI REST API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=SIGNAL_API_IMAGE=docker.io/bbernhard/signal-cli-rest-api:latest
+ExecStartPre=-/usr/bin/podman rm -f signal-api
+ExecStartPre=/usr/bin/podman volume create signal-cli-data
+ExecStart=/usr/bin/podman run --name signal-api --rm \
+  --publish 127.0.0.1:8080:8080 \
+  --env MODE=native \
+  --volume signal-cli-data:/home/.local/share/signal-cli \
+  ${SIGNAL_API_IMAGE}
+ExecStop=/usr/bin/podman stop signal-api
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

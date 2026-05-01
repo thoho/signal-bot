@@ -1,0 +1,16 @@
+[Unit]
+Description=Signal Bot
+After=network-online.target signal-api.service
+Wants=network-online.target signal-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/signal-bot
+EnvironmentFile=/etc/signal-bot.env
+Environment=POLL_ENABLED=true
+ExecStart=/opt/signal-bot/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
