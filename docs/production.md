@@ -10,7 +10,14 @@ not tracked by git.
 
 ## First Install
 
-From a synced checkout on the production server:
+Clone the repository to a suitable location (e.g., your home directory) on the production server:
+
+```sh
+git clone https://github.com/thoho/signal-bot.git
+cd signal-bot
+```
+
+Then run the installation targets:
 
 ```sh
 make dependencies
