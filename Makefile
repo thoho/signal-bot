@@ -10,10 +10,16 @@ SIGNAL_API_IMAGE ?= docker.io/bbernhard/signal-cli-rest-api:latest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dependencies build install start stop restart status logs test test-api clean
+.PHONY: help dependencies build install start stop restart status logs test test-api update clean
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+update: ## Pull latest changes from git and update the production installation.
+	git pull
+	$(MAKE) build
+	$(MAKE) install
+	$(MAKE) restart
 
 dependencies: ## Install/check production dependencies: podman, ffmpeg, Python venv/pip, curl, rsync, systemd.
 	@missing=""; \

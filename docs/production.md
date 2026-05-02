@@ -61,12 +61,17 @@ persists across service restarts and host reboots.
 
 ## Routine Updates
 
-After syncing new code to production:
+The deployment now follows a GitHub-based workflow. After pushing changes from your development environment:
 
 ```sh
-make build
-make install
-make restart
+make update
+```
+
+This target performs a `git pull`, rebuilds the local environment, reinstalls files to `/opt/signal-bot`, and restarts the services.
+
+Verify the update:
+
+```sh
 make test-api
 ```
 
