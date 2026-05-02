@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     transcription_api_key: str = Field(default="")
     transcription_model: str = Field(default="KBLab/kb-whisper-large")
     transcription_task: str = Field(default="transcribe")
+    master_orchestrator_enabled: bool = Field(default=False)
+    master_orchestrator_url: str = Field(default="http://127.0.0.1:8787")
+    master_orchestrator_timeout_seconds: float = Field(default=30.0)
 
 
 @lru_cache

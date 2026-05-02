@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Request
 
 from app.config import Settings, get_settings
 from app.events import SignalMessage, extract_messages
+from app.master_client import MasterClient, MasterClientError
 from app.processor import build_response
 from app.signal_client import SignalApiError, SignalClient
 from app.transcription import TranscriptionClient, TranscriptionError
@@ -31,10 +32,19 @@ def get_transcription_client(
     )
 
 
+def get_master_client(settings: Settings = Depends(get_settings)) -> MasterClient:
+    return MasterClient(
+        settings.master_orchestrator_url,
+        settings.master_orchestrator_enabled,
+        settings.master_orchestrator_timeout_seconds,
+    )
+
+
 async def process_inbound_message(
     message: SignalMessage,
     client: SignalClient,
     transcription_client: TranscriptionClient,
+    master_client: MasterClient | None = None,
 ) -> bool:
     if not message.should_reply:
         return False
@@ -43,10 +53,21 @@ async def process_inbound_message(
         attachment = message.audio_attachments[0]
         audio, content_type = await client.get_attachment(attachment.id)
         transcript = await transcription_client.transcribe(audio, attachment, content_type)
-        await client.send_message(transcript, [message.sender])
+        response = await build_master_or_local_response(
+            message,
+            text=transcript,
+            transcript=transcript,
+            master_client=master_client,
+        )
+        await client.send_message(response, [message.sender])
         return True
 
-    response = await build_response(message)
+    response = await build_master_or_local_response(
+        message,
+        text=message.message,
+        transcript=None,
+        master_client=master_client,
+    )
     if not response:
         return False
 
@@ -54,10 +75,34 @@ async def process_inbound_message(
     return True
 
 
+async def build_master_or_local_response(
+    message: SignalMessage,
+    *,
+    text: str,
+    transcript: str | None,
+    master_client: MasterClient | None,
+) -> str | None:
+    if master_client is not None:
+        try:
+            response = await master_client.send_signal_event(
+                message,
+                text=text,
+                transcript=transcript,
+            )
+            if response:
+                return response
+        except MasterClientError:
+            logger.exception("Master orchestrator request failed; falling back to local processor")
+
+    local_message = message.model_copy(update={"message": text})
+    return await build_response(local_message)
+
+
 async def handle_payload(
     payload: Any,
     client: SignalClient,
     transcription_client: TranscriptionClient,
+    master_client: MasterClient | None = None,
 ) -> dict[str, int]:
     messages = extract_messages(payload)
     replies_sent = 0
@@ -69,7 +114,7 @@ async def handle_payload(
 
     for message in messages:
         try:
-            if await process_inbound_message(message, client, transcription_client):
+            if await process_inbound_message(message, client, transcription_client, master_client):
                 replies_sent += 1
         except (SignalApiError, TranscriptionError):
             logger.exception("Failed to reply to Signal message from %s", message.sender)
@@ -93,6 +138,11 @@ async def poll_signal(settings: Settings) -> None:
         settings.transcription_model,
         settings.transcription_task,
     )
+    master_client = MasterClient(
+        settings.master_orchestrator_url,
+        settings.master_orchestrator_enabled,
+        settings.master_orchestrator_timeout_seconds,
+    )
     while True:
         try:
             payload = await client.receive(
@@ -101,7 +151,7 @@ async def poll_signal(settings: Settings) -> None:
                 send_read_receipts=settings.send_read_receipts,
                 ignore_attachments=settings.ignore_attachments,
             )
-            await handle_payload(payload, client, transcription_client)
+            await handle_payload(payload, client, transcription_client, master_client)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -144,6 +194,7 @@ async def signal_webhook(
     request: Request,
     client: SignalClient = Depends(get_signal_client),
     transcription_client: TranscriptionClient = Depends(get_transcription_client),
+    master_client: MasterClient = Depends(get_master_client),
 ) -> dict[str, int]:
     payload = await request.json()
-    return await handle_payload(payload, client, transcription_client)
+    return await handle_payload(payload, client, transcription_client, master_client)
