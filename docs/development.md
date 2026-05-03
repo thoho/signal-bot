@@ -31,3 +31,21 @@ Run tests:
 ```sh
 make test
 ```
+
+## Syncing with production
+
+Pull the latest commits from GitHub into the dev checkout (e.g. after a
+production hot-fix has been pushed back):
+
+```sh
+make pull
+```
+
+Push committed changes from dev so production can apply them with `make update`:
+
+```sh
+make push
+```
+
+Both targets refuse to run if the working tree is dirty. See
+[Production Operations](production.md) for the full bidirectional flow.

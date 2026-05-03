@@ -10,16 +10,33 @@ SIGNAL_API_IMAGE ?= docker.io/bbernhard/signal-cli-rest-api:latest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dependencies build install start stop restart status logs test test-api update clean
+.PHONY: help dependencies build install start stop restart status logs test test-api push pull update clean
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-update: ## Pull latest changes from git and update the production installation.
-	git pull
-	$(MAKE) build
-	$(MAKE) install
-	$(MAKE) restart
+push: ## Push committed changes on the current branch to origin (dev->GitHub or prod hot-fix->GitHub).
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is dirty. Commit or stash before pushing:"; \
+		git status --short; \
+		exit 1; \
+	fi; \
+	echo "Pushing $$branch to origin..."; \
+	git push origin $$branch
+
+pull: ## Fast-forward pull the current branch from origin (dev sync or prod update step).
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is dirty. Commit or stash before pulling:"; \
+		git status --short; \
+		exit 1; \
+	fi; \
+	echo "Pulling $$branch from origin..."; \
+	git fetch origin; \
+	git pull --ff-only origin $$branch
+
+update: pull build install restart ## Pull latest changes and update the production installation (= pull + build + install + restart).
 
 dependencies: ## Install/check production dependencies: podman, ffmpeg, Python venv/pip, curl, rsync, systemd.
 	@missing=""; \
@@ -54,7 +71,7 @@ build: ## Build/install Python artifacts and pull container images on this host.
 	$(LOCAL_VENV)/bin/python -m pip install -r requirements-dev.txt
 	podman pull $(SIGNAL_API_IMAGE)
 
-install: dependencies ## Install app under /opt, env under /etc, and systemd units for autostart.
+install: ## Install app under /opt, env under /etc, and systemd units for autostart. Run `make dependencies` first on a fresh host.
 	sudo mkdir -p $(INSTALL_DIR)
 	sudo rsync -a --delete \
 		--exclude '.git' \

@@ -96,3 +96,8 @@ pytest
 Production deployment and operations are documented in
 [Production Operations](docs/production.md). Running `make` lists the available
 production targets and their descriptions.
+
+Code moves between dev and prod through GitHub: `make push` from one side,
+`make pull` (or `make update` on prod, which also rebuilds and restarts) on the
+other. The same flow works in reverse for hot-fixes made directly on
+production. See the production doc for details.

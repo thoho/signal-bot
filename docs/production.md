@@ -66,15 +66,26 @@ Scan the QR code with Signal mobile under Settings > Linked devices.
 Signal account data is stored in the Podman volume `signal-cli-data`, so it
 persists across service restarts and host reboots.
 
-## Routine Updates
+## Routine Updates (dev → prod)
 
-The deployment now follows a GitHub-based workflow. After pushing changes from your development environment:
+Code moves from development to production through GitHub. The legacy `sync.sh`
+rsync script has been removed and must not be reintroduced.
+
+On the development host, after committing your changes:
+
+```sh
+make push
+```
+
+On the production host, to apply them:
 
 ```sh
 make update
 ```
 
-This target performs a `git pull`, rebuilds the local environment, reinstalls files to `/opt/signal-bot`, and restarts the services.
+`make update` runs `make pull` (fast-forward pull from origin), then rebuilds the
+local environment, reinstalls files to `/opt/signal-bot`, and restarts the
+services.
 
 Verify the update:
 
@@ -82,10 +93,47 @@ Verify the update:
 make test-api
 ```
 
+## Hot-fix Flow (prod → dev)
+
+If a fix has to be made directly on the production host, push it back through
+GitHub so the development checkout stays in sync:
+
+1. On the production host, in the production checkout (typically the cloned
+   repo, not `/opt/signal-bot`):
+
+   ```sh
+   make pull              # make sure prod has any pending dev commits first
+   # edit files, then:
+   git add <changed-files>
+   git commit -m "<hot-fix description>"
+   make push
+   ```
+
+2. Apply the change to the running services:
+
+   ```sh
+   make update
+   ```
+
+3. On the development host:
+
+   ```sh
+   make pull
+   ```
+
+The `make pull` step on the development host pulls the hot-fix commit into the
+working tree without rebuilding or restarting anything.
+
+If `make push` reports that the working tree is dirty or that origin has
+diverging commits, resolve those first — never force-push from production.
+
 ## Useful Targets
 
 ```sh
-make
+make            # same as `make help`; lists all targets
+make push
+make pull
+make update
 make logs
 make status
 make stop
