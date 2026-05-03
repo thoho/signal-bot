@@ -7,7 +7,6 @@ Wants=network-online.target signal-api.service
 Type=simple
 WorkingDirectory=%h/signal-bot
 EnvironmentFile=%h/.config/signal-bot.env
-Environment=POLL_ENABLED=true
 ExecStart=%h/signal-bot/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=10
