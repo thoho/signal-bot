@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Request
 from app.config import Settings, get_settings
 from app.events import SignalMessage, extract_messages
 from app.master_client import MasterClient, MasterClientError
-from app.processor import build_response
+from app.processor import build_response, is_ping
 from app.signal_client import SignalApiError, SignalClient
 from app.transcription import TranscriptionClient, TranscriptionError
 
@@ -82,6 +82,11 @@ async def build_master_or_local_response(
     transcript: str | None,
     master_client: MasterClient | None,
 ) -> str | None:
+    local_message = message.model_copy(update={"message": text})
+
+    if is_ping(text):
+        return await build_response(local_message)
+
     if master_client is not None:
         try:
             response = await master_client.send_signal_event(
@@ -94,7 +99,6 @@ async def build_master_or_local_response(
         except MasterClientError:
             logger.exception("Master orchestrator request failed; falling back to local processor")
 
-    local_message = message.model_copy(update={"message": text})
     return await build_response(local_message)
 
 

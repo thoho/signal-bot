@@ -19,11 +19,14 @@ class FakeSignalClient:
 
 
 class FakeTranscriptionClient:
+    def __init__(self, transcript: str = "ping") -> None:
+        self.transcript = transcript
+
     async def transcribe(self, audio: bytes, attachment: SignalAttachment, content_type: str) -> str:
         assert audio == b"audio-bytes"
         assert attachment.id == "voice-note-1"
         assert content_type == "audio/ogg"
-        return "ping"
+        return self.transcript
 
 
 class FakeMasterClient:
@@ -45,11 +48,8 @@ class FakeMasterClient:
         return self.reply
 
 
-@pytest.mark.asyncio
-async def test_process_inbound_message_routes_voice_note_transcript_to_master() -> None:
-    signal_client = FakeSignalClient()
-    master_client = FakeMasterClient("pong")
-    message = SignalMessage(
+def _voice_message() -> SignalMessage:
+    return SignalMessage(
         sender="+15551234567",
         message="",
         attachments=[
@@ -63,23 +63,63 @@ async def test_process_inbound_message_routes_voice_note_transcript_to_master() 
         raw={},
     )
 
+
+@pytest.mark.asyncio
+async def test_voice_note_ping_transcript_replies_locally_without_master() -> None:
+    signal_client = FakeSignalClient()
+    master_client = FakeMasterClient("from-master")
+
     sent = await process_inbound_message(
-        message,
+        _voice_message(),
         signal_client,  # type: ignore[arg-type]
-        FakeTranscriptionClient(),  # type: ignore[arg-type]
+        FakeTranscriptionClient("ping"),  # type: ignore[arg-type]
         master_client,  # type: ignore[arg-type]
     )
 
     assert sent is True
     assert signal_client.sent_messages == [("pong", ["+15551234567"])]
-    assert master_client.events == [("ping", "ping")]
+    assert master_client.events == []
+
+
+@pytest.mark.asyncio
+async def test_voice_note_ping_prefix_transcript_echoes_remainder_locally() -> None:
+    signal_client = FakeSignalClient()
+    master_client = FakeMasterClient("from-master")
+
+    sent = await process_inbound_message(
+        _voice_message(),
+        signal_client,  # type: ignore[arg-type]
+        FakeTranscriptionClient("ping check this out"),  # type: ignore[arg-type]
+        master_client,  # type: ignore[arg-type]
+    )
+
+    assert sent is True
+    assert signal_client.sent_messages == [("Pong: check this out", ["+15551234567"])]
+    assert master_client.events == []
+
+
+@pytest.mark.asyncio
+async def test_voice_note_non_ping_transcript_routes_to_master() -> None:
+    signal_client = FakeSignalClient()
+    master_client = FakeMasterClient("from-master")
+
+    sent = await process_inbound_message(
+        _voice_message(),
+        signal_client,  # type: ignore[arg-type]
+        FakeTranscriptionClient("status please"),  # type: ignore[arg-type]
+        master_client,  # type: ignore[arg-type]
+    )
+
+    assert sent is True
+    assert signal_client.sent_messages == [("from-master", ["+15551234567"])]
+    assert master_client.events == [("status please", "status please")]
 
 
 @pytest.mark.asyncio
 async def test_process_inbound_message_falls_back_without_master_reply() -> None:
     signal_client = FakeSignalClient()
     master_client = FakeMasterClient(None)
-    message = SignalMessage(sender="+15551234567", message="ping", raw={})
+    message = SignalMessage(sender="+15551234567", message="hello", raw={})
 
     sent = await process_inbound_message(
         message,
@@ -89,15 +129,15 @@ async def test_process_inbound_message_falls_back_without_master_reply() -> None
     )
 
     assert sent is True
-    assert signal_client.sent_messages == [("pong", ["+15551234567"])]
-    assert master_client.events == [("ping", None)]
+    assert signal_client.sent_messages == [("You said: hello", ["+15551234567"])]
+    assert master_client.events == [("hello", None)]
 
 
 @pytest.mark.asyncio
 async def test_process_inbound_message_falls_back_when_master_fails() -> None:
     signal_client = FakeSignalClient()
     master_client = FakeMasterClient(None, should_fail=True)
-    message = SignalMessage(sender="+15551234567", message="ping", raw={})
+    message = SignalMessage(sender="+15551234567", message="hello", raw={})
 
     sent = await process_inbound_message(
         message,
@@ -107,5 +147,23 @@ async def test_process_inbound_message_falls_back_when_master_fails() -> None:
     )
 
     assert sent is True
-    assert signal_client.sent_messages == [("pong", ["+15551234567"])]
-    assert master_client.events == [("ping", None)]
+    assert signal_client.sent_messages == [("You said: hello", ["+15551234567"])]
+    assert master_client.events == [("hello", None)]
+
+
+@pytest.mark.asyncio
+async def test_process_inbound_message_ping_text_skips_master() -> None:
+    signal_client = FakeSignalClient()
+    master_client = FakeMasterClient("from-master")
+    message = SignalMessage(sender="+15551234567", message="ping status?", raw={})
+
+    sent = await process_inbound_message(
+        message,
+        signal_client,  # type: ignore[arg-type]
+        FakeTranscriptionClient(),  # type: ignore[arg-type]
+        master_client,  # type: ignore[arg-type]
+    )
+
+    assert sent is True
+    assert signal_client.sent_messages == [("Pong: status?", ["+15551234567"])]
+    assert master_client.events == []
