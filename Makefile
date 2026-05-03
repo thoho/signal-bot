@@ -9,6 +9,10 @@ SIGNAL_API_IMAGE ?= docker.io/bbernhard/signal-cli-rest-api:latest
 VOLUME_TARBALL ?= /tmp/signal-cli-data.tar
 SERVICES := signal-api.service signal-bot.service
 
+# Ensure systemctl --user works even in SSH sessions where pam_systemd didn't
+# set XDG_RUNTIME_DIR. Requires linger to be enabled for this user.
+export XDG_RUNTIME_DIR ?= /run/user/$(shell id -u)
+
 .DEFAULT_GOAL := help
 
 .PHONY: help dependencies build install start stop restart status logs test test-api push pull update clean import-signal-volume
