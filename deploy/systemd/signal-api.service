@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=SIGNAL_API_IMAGE=docker.io/bbernhard/signal-cli-rest-api:latest
 ExecStartPre=-/usr/bin/podman rm -f signal-api
-ExecStartPre=/usr/bin/podman volume create signal-cli-data
+ExecStartPre=-/usr/bin/podman volume create signal-cli-data
 ExecStart=/usr/bin/podman run --name signal-api --rm \
   --publish 127.0.0.1:8080:8080 \
   --env MODE=native \
