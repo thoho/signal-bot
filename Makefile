@@ -22,7 +22,7 @@ help: ## List available targets.
 
 push: ## Push committed changes on the current branch to origin (dev->GitHub or prod hot-fix->GitHub).
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
-	if [ -n "$$(git status --porcelain)" ]; then \
+	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
 		echo "Working tree is dirty. Commit or stash before pushing:"; \
 		git status --short; \
 		exit 1; \
@@ -32,7 +32,7 @@ push: ## Push committed changes on the current branch to origin (dev->GitHub or 
 
 pull: ## Fast-forward pull the current branch from origin (dev sync or prod update step).
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
-	if [ -n "$$(git status --porcelain)" ]; then \
+	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
 		echo "Working tree is dirty. Commit or stash before pulling:"; \
 		git status --short; \
 		exit 1; \
