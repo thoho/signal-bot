@@ -114,8 +114,8 @@ restart: ## Restart production services.
 status: ## Show systemd status for production services.
 	systemctl --user status $(SERVICES) --no-pager
 
-logs: ## Show recent backend logs.
-	journalctl --user-unit signal-bot.service --user-unit signal-api.service -n 100 --no-pager
+logs: ## Tail backend logs (last 30 lines, then follow until Ctrl-C).
+	journalctl --user-unit signal-bot.service --user-unit signal-api.service -n 30 -f
 
 test: ## Run all local test suites.
 	@if [ -x ".venv/bin/pytest" ]; then .venv/bin/pytest; else $(PYTHON) -m pytest; fi
