@@ -1,58 +1,72 @@
 # Production Operations
 
-Production is expected to run two long-lived services:
+Production runs as the unprivileged `signal-bot` user via **user-mode systemd**, with two long-lived services:
 
-- `signal-api.service`: a Podman-managed `signal-cli-rest-api` container.
-- `signal-bot.service`: the FastAPI bot running from `/opt/signal-bot`.
+- `signal-api.service`: a rootless Podman container running `signal-cli-rest-api`.
+- `signal-bot.service`: the FastAPI bot running from `~signal-bot/signal-bot/`.
 
-The bot reads secrets and runtime config from `/etc/signal-bot.env`. That file is
-not tracked by git.
+Runtime config and secrets live in `~signal-bot/.config/signal-bot.env` (mode 600, not tracked by git). Daily operations are run as `signal-bot` and require no `sudo`.
 
 ## First Install
 
-Clone the repository to a suitable location (e.g., your home directory) on the production server:
+The repo is expected at `~signal-bot/signal-bot/`. The `signal-bot` user holds an SSH deploy key for git pull/push.
+
+### One-time root setup
+
+These steps need root and only run once on a fresh host (or when migrating off the old root-managed setup). Run them from an account with `sudo`:
 
 ```sh
-git clone https://github.com/thoho/signal-bot.git
-cd signal-bot
+# 1. (Migration only) Stop and remove the old root-managed services
+sudo systemctl stop signal-bot signal-api
+sudo systemctl disable signal-bot signal-api
+sudo rm -f /etc/systemd/system/signal-bot.service /etc/systemd/system/signal-api.service
+sudo systemctl daemon-reload
+
+# 2. (Migration only) Export the existing signal-cli-data volume so we don't have to re-link Signal
+sudo podman volume export signal-cli-data -o /tmp/signal-cli-data.tar
+sudo chown signal-bot:signal-bot /tmp/signal-cli-data.tar
+
+# 3. (Migration only) Remove the old install tree and env file
+sudo rm -rf /opt/signal-bot /etc/signal-bot.env
+
+# 4. Allow signal-bot's user-mode systemd to start at boot without an active login
+sudo loginctl enable-linger signal-bot
 ```
 
-Then run the installation targets:
+### Setup as `signal-bot`
+
+SSH in as `signal-bot`:
 
 ```sh
-make dependencies
+cd ~/signal-bot
+make dependencies              # checks for ffmpeg/podman/etc.; if anything is missing it
+                               # prints the apt command for a sudoer to run, then re-run this
 make build
-make install
+make install                   # seeds ~/.config/signal-bot.env from .env.example, installs user units
+$EDITOR ~/.config/signal-bot.env   # set SIGNAL_NUMBER, TRANSCRIPTION_API_KEY, etc.
 ```
 
-Then edit:
+If you exported the old volume in step 2 above, import it now so Signal stays linked:
 
 ```sh
-sudoedit /etc/signal-bot.env
+make import-signal-volume
 ```
 
-Required values:
+Otherwise you'll re-link via QR after `make start` — see [Signal Linking](#signal-linking).
 
-```env
-SIGNAL_NUMBER=+15551234567
-TRANSCRIPTION_API_KEY=...
-IGNORE_ATTACHMENTS=false
-TRANSCRIPTION_TASK=transcribe
-```
-
-Start services:
+Start the services:
 
 ```sh
 make start
+make test-api
 ```
 
 ## Signal Linking
 
-The Signal REST API listens only on localhost in production. Tunnel it from your
-laptop:
+The Signal REST API listens only on localhost in production. Tunnel it from your laptop:
 
 ```sh
-ssh -L 18080:localhost:8080 user@production-host
+ssh -L 18080:localhost:8080 signal-bot@production-host
 ```
 
 Open:
@@ -61,10 +75,7 @@ Open:
 http://localhost:18080/v1/qrcodelink?device_name=signal-bot
 ```
 
-Scan the QR code with Signal mobile under Settings > Linked devices.
-
-Signal account data is stored in the Podman volume `signal-cli-data`, so it
-persists across service restarts and host reboots.
+Scan the QR code with Signal mobile under Settings > Linked devices. Account data persists in the rootless Podman volume `signal-cli-data` under `~signal-bot/.local/share/containers/`.
 
 ## Routine Updates (dev → prod)
 
@@ -80,12 +91,14 @@ make push
 On the production host, to apply them:
 
 ```sh
+ssh signal-bot@production-host
+cd ~/signal-bot
 make update
 ```
 
-`make update` runs `make pull` (fast-forward pull from origin), then rebuilds the
-local environment, reinstalls files to `/opt/signal-bot`, and restarts the
-services.
+`make update` runs `make pull` (fast-forward pull from origin), then rebuilds
+the venv, refreshes the user-mode systemd units, and restarts the services. No
+`sudo`.
 
 Verify the update:
 
@@ -98,8 +111,7 @@ make test-api
 If a fix has to be made directly on the production host, push it back through
 GitHub so the development checkout stays in sync:
 
-1. On the production host, in the production checkout (typically the cloned
-   repo, not `/opt/signal-bot`):
+1. On the production host, SSHed in as `signal-bot`, in `~/signal-bot`:
 
    ```sh
    make pull              # make sure prod has any pending dev commits first
@@ -145,8 +157,8 @@ make test-api
 
 ## Notes
 
-- `make install` preserves an existing `/etc/signal-bot.env`.
-- `signal-api.service` binds `signal-cli-rest-api` to `127.0.0.1:8080`.
-- `signal-bot.service` binds the bot to `127.0.0.1:8000`.
+- `make install` preserves an existing `~/.config/signal-bot.env`.
+- `signal-api.service` runs rootless Podman; the container is bound to `127.0.0.1:8080`.
+- `signal-bot.service` binds uvicorn to `127.0.0.1:8000`.
 - Voice messages may arrive as AAC; the bot uses `ffmpeg` to convert them to MP3
   before transcription.

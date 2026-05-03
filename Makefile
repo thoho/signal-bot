@@ -1,19 +1,20 @@
 SHELL := /bin/sh
 
 APP_NAME := signal-bot
-INSTALL_DIR ?= /opt/$(APP_NAME)
-ENV_FILE ?= /etc/$(APP_NAME).env
+ENV_FILE ?= $(HOME)/.config/$(APP_NAME).env
+SYSTEMD_USER_DIR ?= $(HOME)/.config/systemd/user
 PYTHON ?= python3
-VENV := $(INSTALL_DIR)/.venv
 LOCAL_VENV := .venv
 SIGNAL_API_IMAGE ?= docker.io/bbernhard/signal-cli-rest-api:latest
+VOLUME_TARBALL ?= /tmp/signal-cli-data.tar
+SERVICES := signal-api.service signal-bot.service
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dependencies build install start stop restart status logs test test-api push pull update clean
+.PHONY: help dependencies build install start stop restart status logs test test-api push pull update clean import-signal-volume
 
 help: ## List available targets.
-	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 push: ## Push committed changes on the current branch to origin (dev->GitHub or prod hot-fix->GitHub).
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
@@ -38,29 +39,27 @@ pull: ## Fast-forward pull the current branch from origin (dev sync or prod upda
 
 update: pull build install restart ## Pull latest changes and update the production installation (= pull + build + install + restart).
 
-dependencies: ## Install/check production dependencies: podman, ffmpeg, Python venv/pip, curl, rsync, systemd.
+dependencies: ## Check production dependencies. If anything is missing, print the root command needed.
 	@missing=""; \
-	for cmd in podman ffmpeg curl rsync systemctl $(PYTHON); do \
+	for cmd in podman ffmpeg curl systemctl $(PYTHON); do \
 		command -v $$cmd >/dev/null 2>&1 || missing="$$missing $$cmd"; \
 	done; \
 	tmpdir=$$(mktemp -d); \
 	if ! $(PYTHON) -m venv "$$tmpdir/venv" >/dev/null 2>&1; then missing="$$missing python3-venv"; fi; \
 	rm -rf "$$tmpdir"; \
-	if [ -n "$$missing" ]; then \
-		if command -v apt-get >/dev/null 2>&1; then \
-			echo "Installing missing dependencies:$$missing"; \
-			sudo apt-get update; \
-			sudo apt-get install -y podman ffmpeg curl rsync python3-venv python3-pip; \
-		else \
-			echo "Missing dependencies:$$missing"; \
-			echo "Install them with your OS package manager, then rerun make dependencies."; \
-			exit 1; \
-		fi; \
-	else \
+	if [ -z "$$missing" ]; then \
 		echo "All required dependencies are present."; \
+	else \
+		echo "Missing dependencies:$$missing"; \
+		echo ""; \
+		echo "Ask a sudoer to run on this host:"; \
+		echo "  sudo apt-get update && sudo apt-get install -y podman ffmpeg curl python3-venv python3-pip"; \
+		echo ""; \
+		echo "Then rerun: make dependencies"; \
+		exit 1; \
 	fi
 
-build: ## Build/install Python artifacts and pull container images on this host.
+build: ## Build the local Python venv and pull container images.
 	@if [ -d "$(LOCAL_VENV)" ] && [ ! -x "$(LOCAL_VENV)/bin/python" ]; then \
 		echo "Removing incomplete $(LOCAL_VENV)"; \
 		rm -rf "$(LOCAL_VENV)"; \
@@ -71,56 +70,48 @@ build: ## Build/install Python artifacts and pull container images on this host.
 	$(LOCAL_VENV)/bin/python -m pip install -r requirements-dev.txt
 	podman pull $(SIGNAL_API_IMAGE)
 
-install: ## Install app under /opt, env under /etc, and systemd units for autostart. Run `make dependencies` first on a fresh host.
-	sudo mkdir -p $(INSTALL_DIR)
-	sudo rsync -a --delete \
-		--exclude '.git' \
-		--exclude '.venv' \
-		--exclude '.env' \
-		--exclude '.env~' \
-		--exclude '__pycache__' \
-		--exclude '.pytest_cache' \
-		--exclude 'bot.log' \
-		./ $(INSTALL_DIR)/
-	@if [ -d "$(VENV)" ] && [ ! -x "$(VENV)/bin/python" ]; then \
-		echo "Removing incomplete $(VENV)"; \
-		sudo rm -rf "$(VENV)"; \
-	fi
-	sudo $(PYTHON) -m venv $(VENV)
-	sudo $(VENV)/bin/python -m ensurepip --upgrade
-	sudo $(VENV)/bin/python -m pip install --upgrade pip
-	sudo $(VENV)/bin/python -m pip install -r $(INSTALL_DIR)/requirements.txt
+install: ## Install env file (if missing) and user-mode systemd units. No sudo.
+	@mkdir -p $(dir $(ENV_FILE))
 	@if [ ! -f "$(ENV_FILE)" ]; then \
-		if [ -f ".env" ]; then \
-			echo "Creating $(ENV_FILE) from local .env"; \
-			sudo install -m 600 .env $(ENV_FILE); \
-		else \
-			echo "Creating $(ENV_FILE) from .env.example; edit secrets before starting."; \
-			sudo install -m 600 .env.example $(ENV_FILE); \
-		fi; \
+		echo "Creating $(ENV_FILE) from .env.example; edit secrets before starting."; \
+		install -m 600 .env.example $(ENV_FILE); \
 	else \
 		echo "Keeping existing $(ENV_FILE)"; \
 	fi
-	sudo install -m 644 deploy/systemd/signal-api.service /etc/systemd/system/signal-api.service
-	sudo install -m 644 deploy/systemd/signal-bot.service /etc/systemd/system/signal-bot.service
-	sudo systemctl daemon-reload
-	sudo systemctl enable signal-api.service signal-bot.service
-	@echo "Installed. Edit $(ENV_FILE), then run: make restart"
+	@mkdir -p $(SYSTEMD_USER_DIR)
+	install -m 644 deploy/systemd/signal-api.service $(SYSTEMD_USER_DIR)/signal-api.service
+	install -m 644 deploy/systemd/signal-bot.service $(SYSTEMD_USER_DIR)/signal-bot.service
+	systemctl --user daemon-reload
+	systemctl --user enable $(SERVICES)
+	@echo "Installed. Edit $(ENV_FILE) if needed, then run: make start"
+
+import-signal-volume: ## Import signal-cli-data volume from $(VOLUME_TARBALL) into rootless podman.
+	@if [ ! -f "$(VOLUME_TARBALL)" ]; then \
+		echo "Tarball $(VOLUME_TARBALL) not found."; \
+		echo "First, on a sudoer account, run:"; \
+		echo "  sudo podman volume export signal-cli-data -o $(VOLUME_TARBALL)"; \
+		echo "  sudo chown $$(id -un):$$(id -gn) $(VOLUME_TARBALL)"; \
+		exit 1; \
+	fi
+	-podman volume create signal-cli-data
+	podman volume import signal-cli-data $(VOLUME_TARBALL)
+	rm -f $(VOLUME_TARBALL)
+	@echo "Imported. Restart services with: make restart"
 
 start: ## Start production services.
-	sudo systemctl start signal-api.service signal-bot.service
+	systemctl --user start $(SERVICES)
 
 stop: ## Stop production services.
-	sudo systemctl stop signal-bot.service signal-api.service
+	systemctl --user stop signal-bot.service signal-api.service
 
 restart: ## Restart production services.
-	sudo systemctl restart signal-api.service signal-bot.service
+	systemctl --user restart $(SERVICES)
 
 status: ## Show systemd status for production services.
-	sudo systemctl status signal-api.service signal-bot.service --no-pager
+	systemctl --user status $(SERVICES) --no-pager
 
 logs: ## Show recent backend logs.
-	sudo journalctl -u signal-bot.service -u signal-api.service -n 100 --no-pager
+	journalctl --user-unit signal-bot.service --user-unit signal-api.service -n 100 --no-pager
 
 test: ## Run all local test suites.
 	@if [ -x ".venv/bin/pytest" ]; then .venv/bin/pytest; else $(PYTHON) -m pytest; fi
