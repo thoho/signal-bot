@@ -14,7 +14,7 @@ from app.signal_client import SignalApiError, SignalClient
 from app.transcription import TranscriptionClient, TranscriptionError
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, get_settings().log_level.upper(), logging.INFO))
 
 
 def get_signal_client(settings: Settings = Depends(get_settings)) -> SignalClient:
@@ -53,15 +53,18 @@ async def process_inbound_message(
         attachment = message.audio_attachments[0]
         audio, content_type = await client.get_attachment(attachment.id)
         transcript = await transcription_client.transcribe(audio, attachment, content_type)
+        logger.debug("Inbound from %s (transcribed): %s", message.sender, transcript)
         response = await build_master_or_local_response(
             message,
             text=transcript,
             transcript=transcript,
             master_client=master_client,
         )
+        logger.debug("Reply to %s: %s", message.sender, response)
         await client.send_message(response, [message.sender])
         return True
 
+    logger.debug("Inbound from %s: %s", message.sender, message.message)
     response = await build_master_or_local_response(
         message,
         text=message.message,
@@ -71,6 +74,7 @@ async def process_inbound_message(
     if not response:
         return False
 
+    logger.debug("Reply to %s: %s", message.sender, response)
     await client.send_message(response, [message.sender])
     return True
 
