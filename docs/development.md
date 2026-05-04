@@ -15,7 +15,7 @@ Run the Signal REST API locally with Podman:
 podman volume create signal-cli-data
 podman run -d --name signal-api \
   -p 8080:8080 \
-  -e MODE=native \
+  -e MODE=json-rpc \
   -v signal-cli-data:/home/.local/share/signal-cli \
   docker.io/bbernhard/signal-cli-rest-api:latest
 ```

@@ -10,7 +10,7 @@ ExecStartPre=-/usr/bin/podman rm -f signal-api
 ExecStartPre=-/usr/bin/podman volume create signal-cli-data
 ExecStart=/usr/bin/podman run --name signal-api --rm \
   --publish 127.0.0.1:8080:8080 \
-  --env MODE=native \
+  --env MODE=json-rpc \
   --volume signal-cli-data:/home/.local/share/signal-cli \
   ${SIGNAL_API_IMAGE}
 ExecStop=/usr/bin/podman stop signal-api
