@@ -139,6 +139,27 @@ def _extract_data_message(envelope: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+_KNOWN_NON_MESSAGE_KEYS = ("receiptMessage", "typingMessage", "callMessage")
+
+
+def is_known_non_message_envelope(item: Any) -> bool:
+    """True if the item is a Signal envelope we recognize but won't reply to.
+
+    Signal-cli forwards delivery/read receipts, typing indicators, call
+    signaling, and sync receipts alongside real messages. They are
+    expected traffic, not a sign of a malformed payload.
+    """
+    if not isinstance(item, dict):
+        return False
+    envelope = _extract_envelope(item)
+    if any(isinstance(envelope.get(k), dict) for k in _KNOWN_NON_MESSAGE_KEYS):
+        return True
+    sync_message = envelope.get("syncMessage")
+    if isinstance(sync_message, dict) and not isinstance(sync_message.get("sentMessage"), dict):
+        return True
+    return False
+
+
 def _extract_attachments(data: dict[str, Any]) -> list[SignalAttachment]:
     raw_attachments = data.get("attachments")
     if not isinstance(raw_attachments, list):

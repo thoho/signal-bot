@@ -1,8 +1,10 @@
+import logging
+
 import pytest
 
 from app.events import SignalAttachment, SignalMessage
 from app.master_client import MasterClientError
-from app.main import process_inbound_message
+from app.main import handle_payload, process_inbound_message
 
 
 class FakeSignalClient:
@@ -167,3 +169,44 @@ async def test_process_inbound_message_ping_text_skips_master() -> None:
     assert sent is True
     assert signal_client.sent_messages == [("Pong: status?", ["+15551234567"])]
     assert master_client.events == []
+
+
+@pytest.mark.asyncio
+async def test_handle_payload_logs_receipt_only_payload_at_debug(caplog) -> None:
+    signal_client = FakeSignalClient()
+    payload = [
+        {"envelope": {"source": "uuid", "receiptMessage": {"isDelivery": True}}},
+        {"envelope": {"source": "uuid", "receiptMessage": {"isRead": True}}},
+    ]
+
+    with caplog.at_level(logging.DEBUG, logger="app.main"):
+        result = await handle_payload(
+            payload,
+            signal_client,  # type: ignore[arg-type]
+            FakeTranscriptionClient(),  # type: ignore[arg-type]
+            FakeMasterClient(None),  # type: ignore[arg-type]
+        )
+
+    assert result == {"messages_received": 0, "replies_sent": 0}
+    assert any(
+        record.levelno == logging.DEBUG and "receipt/typing/call" in record.message
+        for record in caplog.records
+    )
+    assert not any(record.levelno == logging.WARNING for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_handle_payload_warns_on_unknown_payload_shape(caplog) -> None:
+    signal_client = FakeSignalClient()
+    payload = [{"envelope": {"source": "uuid", "mysteryMessage": {}}}]
+
+    with caplog.at_level(logging.DEBUG, logger="app.main"):
+        result = await handle_payload(
+            payload,
+            signal_client,  # type: ignore[arg-type]
+            FakeTranscriptionClient(),  # type: ignore[arg-type]
+            FakeMasterClient(None),  # type: ignore[arg-type]
+        )
+
+    assert result == {"messages_received": 0, "replies_sent": 0}
+    assert any(record.levelno == logging.WARNING for record in caplog.records)

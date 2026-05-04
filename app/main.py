@@ -7,14 +7,15 @@ from typing import Any
 from fastapi import Depends, FastAPI, Request
 
 from app.config import Settings, get_settings
-from app.events import SignalMessage, extract_messages
+from app.events import SignalMessage, extract_messages, is_known_non_message_envelope
 from app.master_client import MasterClient, MasterClientError
 from app.processor import build_response, is_ping
 from app.signal_client import SignalApiError, SignalClient
 from app.transcription import TranscriptionClient, TranscriptionError
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=getattr(logging, get_settings().log_level.upper(), logging.INFO))
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("app").setLevel(getattr(logging, get_settings().log_level.upper(), logging.INFO))
 
 
 def get_signal_client(settings: Settings = Depends(get_settings)) -> SignalClient:
@@ -118,7 +119,11 @@ async def handle_payload(
     if messages:
         logger.info("Received %s Signal message(s)", len(messages))
     elif payload not in (None, []):
-        logger.warning("Signal payload did not contain processable messages: %s", _summarize_payload(payload))
+        items = payload if isinstance(payload, list) else [payload]
+        if items and all(is_known_non_message_envelope(i) for i in items):
+            logger.debug("Skipped %s receipt/typing/call envelope(s)", len(items))
+        else:
+            logger.warning("Signal payload did not contain processable messages: %s", _summarize_payload(payload))
 
     for message in messages:
         try:
