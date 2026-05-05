@@ -3,8 +3,8 @@ import logging
 import pytest
 
 from app.events import SignalAttachment, SignalMessage
-from app.master_client import MasterClientError
 from app.main import handle_payload, process_inbound_message
+from app.master_client import MasterClientError
 
 
 class FakeSignalClient:
@@ -24,7 +24,9 @@ class FakeTranscriptionClient:
     def __init__(self, transcript: str = "ping") -> None:
         self.transcript = transcript
 
-    async def transcribe(self, audio: bytes, attachment: SignalAttachment, content_type: str) -> str:
+    async def transcribe(
+        self, audio: bytes, attachment: SignalAttachment, content_type: str
+    ) -> str:
         assert audio == b"audio-bytes"
         assert attachment.id == "voice-note-1"
         assert content_type == "audio/ogg"

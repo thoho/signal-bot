@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -61,6 +63,8 @@ async def process_inbound_message(
             transcript=transcript,
             master_client=master_client,
         )
+        if not response:
+            return False
         logger.debug("Reply to %s: %s", message.sender, response)
         await client.send_message(response, [message.sender])
         return True
@@ -123,7 +127,10 @@ async def handle_payload(
         if items and all(is_known_non_message_envelope(i) for i in items):
             logger.debug("Skipped %s receipt/typing/call envelope(s)", len(items))
         else:
-            logger.warning("Signal payload did not contain processable messages: %s", _summarize_payload(payload))
+            logger.warning(
+                "Signal payload did not contain processable messages: %s",
+                _summarize_payload(payload),
+            )
 
     for message in messages:
         try:
@@ -173,7 +180,7 @@ async def poll_signal(settings: Settings) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     task: asyncio.Task[None] | None = None
 
@@ -188,10 +195,8 @@ async def lifespan(app: FastAPI):
     finally:
         if task is not None:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
 
 app = FastAPI(title="Signal Bot", lifespan=lifespan)

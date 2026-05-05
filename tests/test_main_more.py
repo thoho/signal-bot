@@ -230,9 +230,11 @@ async def test_poll_signal_swallows_unexpected_error_then_continues(
     monkeypatch.setattr("app.main.TranscriptionClient", lambda *a, **k: object())
     monkeypatch.setattr("app.main.MasterClient", lambda *a, **k: object())
 
-    with caplog.at_level(logging.ERROR, logger="app.main"):
-        with pytest.raises(asyncio.CancelledError):
-            await poll_signal(settings)
+    with (
+        caplog.at_level(logging.ERROR, logger="app.main"),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await poll_signal(settings)
 
     assert state["calls"] == 2
     assert any("Signal polling failed" in rec.message for rec in caplog.records)

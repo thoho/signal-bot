@@ -15,7 +15,7 @@ export XDG_RUNTIME_DIR ?= /run/user/$(shell id -u)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dependencies build install start stop restart status logs test test-api push pull update clean import-signal-volume
+.PHONY: help dependencies build install start stop restart status logs test test-api lint typecheck coverage check push pull update clean import-signal-volume
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*##"; printf "Available targets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -117,12 +117,27 @@ status: ## Show systemd status for production services.
 logs: ## Tail backend logs (last 30 lines, then follow until Ctrl-C).
 	journalctl --user-unit signal-bot.service --user-unit signal-api.service -n 30 -f
 
+PY := $(if $(wildcard $(LOCAL_VENV)/bin/python),$(LOCAL_VENV)/bin/python,$(PYTHON))
+
 test: ## Run all local test suites.
-	@if [ -x ".venv/bin/pytest" ]; then .venv/bin/pytest; else $(PYTHON) -m pytest; fi
+	$(PY) -m pytest
 
 test-api: ## Check local production HTTP endpoints.
 	curl -fsS http://localhost:8080/v1/about
 	curl -fsS http://localhost:8000/health
 
+lint: ## Lint with ruff.
+	$(PY) -m ruff check app/ tests/
+
+typecheck: ## Type-check app/ with mypy --strict (configured in pyproject.toml).
+	$(PY) -m mypy
+
+coverage: ## Run pytest under coverage and fail if below 90%.
+	$(PY) -m coverage run -m pytest
+	$(PY) -m coverage report --fail-under=90
+
+check: lint typecheck coverage ## Run all local quality gates (lint + types + tests + coverage).
+
 clean: ## Remove local test/build caches.
-	rm -rf .pytest_cache app/__pycache__ tests/__pycache__
+	rm -rf .pytest_cache .ruff_cache .mypy_cache .coverage \
+	    app/__pycache__ tests/__pycache__

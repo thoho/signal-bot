@@ -51,10 +51,7 @@ def extract_messages(payload: Any) -> list[SignalMessage]:
     if payload is None:
         return []
 
-    if isinstance(payload, list):
-        items = payload
-    else:
-        items = [payload]
+    items = payload if isinstance(payload, list) else [payload]
 
     messages: list[SignalMessage] = []
     for item in items:
@@ -116,11 +113,14 @@ def _extract_envelope(item: dict[str, Any]) -> dict[str, Any]:
     params = item.get("params")
     if isinstance(params, dict):
         result = params.get("result")
-        if isinstance(result, dict) and isinstance(result.get("envelope"), dict):
-            return result["envelope"]
+        if isinstance(result, dict):
+            nested = result.get("envelope")
+            if isinstance(nested, dict):
+                return nested
 
-        if isinstance(params.get("envelope"), dict):
-            return params["envelope"]
+        params_envelope = params.get("envelope")
+        if isinstance(params_envelope, dict):
+            return params_envelope
 
     return item
 
@@ -155,9 +155,9 @@ def is_known_non_message_envelope(item: Any) -> bool:
     if any(isinstance(envelope.get(k), dict) for k in _KNOWN_NON_MESSAGE_KEYS):
         return True
     sync_message = envelope.get("syncMessage")
-    if isinstance(sync_message, dict) and not isinstance(sync_message.get("sentMessage"), dict):
-        return True
-    return False
+    return isinstance(sync_message, dict) and not isinstance(
+        sync_message.get("sentMessage"), dict
+    )
 
 
 def _extract_attachments(data: dict[str, Any]) -> list[SignalAttachment]:

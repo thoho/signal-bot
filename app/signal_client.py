@@ -26,7 +26,8 @@ class SignalClient:
             )
         if not response.content:
             return {}
-        return response.json()
+        body: dict[str, Any] = response.json()
+        return body
 
     async def receive(
         self,
@@ -36,7 +37,7 @@ class SignalClient:
         send_read_receipts: bool,
         ignore_attachments: bool,
     ) -> Any:
-        params = {
+        params: dict[str, str | int] = {
             "timeout": timeout_seconds,
             "max_messages": max_messages,
             "send_read_receipts": str(send_read_receipts).lower(),
