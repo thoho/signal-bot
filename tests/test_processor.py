@@ -37,3 +37,13 @@ async def test_echo_response() -> None:
     message = SignalMessage(sender="+15551234567", message="hello", raw={})
 
     assert await build_response(message) == "You said: hello"
+
+
+@pytest.mark.asyncio
+async def test_help_response() -> None:
+    message = SignalMessage(sender="+15551234567", message="help", raw={})
+
+    reply = await build_response(message)
+
+    assert reply is not None
+    assert "ping" in reply.lower()
