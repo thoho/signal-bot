@@ -58,6 +58,7 @@ async def process_inbound_message(
         audio, content_type = await client.get_attachment(attachment.id)
         transcript = await transcription_client.transcribe(audio, attachment, content_type)
         logger.debug("Inbound from %s (transcribed): %s", message.sender, transcript)
+        await _send_thinking_notice_if_needed(client, message, transcript, master_client)
         response = await build_master_or_local_response(
             message,
             text=transcript,
@@ -71,6 +72,7 @@ async def process_inbound_message(
         return True
 
     logger.debug("Inbound from %s: %s", message.sender, message.message)
+    await _send_thinking_notice_if_needed(client, message, message.message, master_client)
     response = await build_master_or_local_response(
         message,
         text=message.message,
@@ -83,6 +85,21 @@ async def process_inbound_message(
     logger.debug("Reply to %s: %s", message.sender, response)
     await client.send_message(response, [message.sender])
     return True
+
+
+async def _send_thinking_notice_if_needed(
+    client: SignalClient,
+    message: SignalMessage,
+    text: str,
+    master_client: MasterClient | None,
+) -> None:
+    if master_client is None or not master_client.enabled or is_ping(text):
+        return
+
+    try:
+        await client.send_message("[thinking]", [message.sender])
+    except SignalApiError:
+        logger.exception("Failed to send thinking notice to %s", message.sender)
 
 
 async def build_master_or_local_response(

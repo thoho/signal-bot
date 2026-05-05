@@ -5,13 +5,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     signal_api_url: str = Field(default="http://localhost:8080")
     signal_number: str = Field(default="")
     poll_enabled: bool = Field(default=False)
-    poll_timeout_seconds: int = Field(default=30)
-    poll_interval_seconds: float = Field(default=1.0)
+    poll_timeout_seconds: int = Field(default=10)
+    poll_interval_seconds: float = Field(default=0.2)
     max_messages: int = Field(default=10)
     max_message_age_seconds: int = Field(default=0, ge=0)
     send_read_receipts: bool = Field(default=True)

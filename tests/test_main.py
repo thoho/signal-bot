@@ -34,9 +34,12 @@ class FakeTranscriptionClient:
 
 
 class FakeMasterClient:
-    def __init__(self, reply: str | None, should_fail: bool = False) -> None:
+    def __init__(
+        self, reply: str | None, should_fail: bool = False, enabled: bool = True
+    ) -> None:
         self.reply = reply
         self.should_fail = should_fail
+        self.enabled = enabled
         self.events: list[tuple[str, str | None]] = []
 
     async def send_signal_event(
@@ -115,7 +118,10 @@ async def test_voice_note_non_ping_transcript_routes_to_master() -> None:
     )
 
     assert sent is True
-    assert signal_client.sent_messages == [("from-master", ["+15551234567"])]
+    assert signal_client.sent_messages == [
+        ("[thinking]", ["+15551234567"]),
+        ("from-master", ["+15551234567"]),
+    ]
     assert master_client.events == [("status please", "status please")]
 
 
@@ -133,7 +139,10 @@ async def test_process_inbound_message_falls_back_without_master_reply() -> None
     )
 
     assert sent is True
-    assert signal_client.sent_messages == [("You said: hello", ["+15551234567"])]
+    assert signal_client.sent_messages == [
+        ("[thinking]", ["+15551234567"]),
+        ("You said: hello", ["+15551234567"]),
+    ]
     assert master_client.events == [("hello", None)]
 
 
@@ -151,7 +160,10 @@ async def test_process_inbound_message_falls_back_when_master_fails() -> None:
     )
 
     assert sent is True
-    assert signal_client.sent_messages == [("You said: hello", ["+15551234567"])]
+    assert signal_client.sent_messages == [
+        ("[thinking]", ["+15551234567"]),
+        ("You said: hello", ["+15551234567"]),
+    ]
     assert master_client.events == [("hello", None)]
 
 
@@ -170,6 +182,24 @@ async def test_process_inbound_message_ping_text_skips_master() -> None:
 
     assert sent is True
     assert signal_client.sent_messages == [("Pong: status?", ["+15551234567"])]
+    assert master_client.events == []
+
+
+@pytest.mark.asyncio
+async def test_process_inbound_message_does_not_send_thinking_for_direct_ping() -> None:
+    signal_client = FakeSignalClient()
+    master_client = FakeMasterClient("from-master")
+    message = SignalMessage(sender="+15551234567", message="ping", raw={})
+
+    sent = await process_inbound_message(
+        message,
+        signal_client,  # type: ignore[arg-type]
+        FakeTranscriptionClient(),  # type: ignore[arg-type]
+        master_client,  # type: ignore[arg-type]
+    )
+
+    assert sent is True
+    assert signal_client.sent_messages == [("pong", ["+15551234567"])]
     assert master_client.events == []
 
 

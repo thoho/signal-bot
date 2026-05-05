@@ -52,6 +52,13 @@ def test_get_master_client_factory_uses_settings() -> None:
     assert client.timeout_seconds == 12.5
 
 
+def test_settings_defaults_are_lower_latency() -> None:
+    settings = Settings()
+
+    assert settings.poll_timeout_seconds == 10
+    assert settings.poll_interval_seconds == 0.2
+
+
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_ok() -> None:
     transport = httpx.ASGITransport(app=app)
