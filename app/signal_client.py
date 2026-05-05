@@ -1,6 +1,11 @@
+import asyncio
+import json
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import httpx
+import websockets
+from websockets.exceptions import InvalidStatus, WebSocketException
 
 from app._retry import retry_request
 
@@ -37,6 +42,55 @@ class SignalClient:
         return body
 
     async def receive(
+        self,
+        *,
+        timeout_seconds: int,
+        max_messages: int,
+        send_read_receipts: bool,
+        ignore_attachments: bool,
+    ) -> Any:
+        messages: list[Any] = []
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        try:
+            async with websockets.connect(
+                self._receive_websocket_url(),
+                open_timeout=10,
+                ping_interval=20,
+                ping_timeout=20,
+                proxy=None,
+            ) as websocket:
+                while len(messages) < max_messages:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                    except TimeoutError:
+                        break
+                    messages.append(_decode_websocket_message(raw))
+        except InvalidStatus as exc:
+            if exc.response.status_code != 200:
+                raise SignalApiError(
+                    f"signal-cli-rest-api websocket receive failed: {exc}"
+                ) from exc
+            return await self._receive_http(
+                timeout_seconds=timeout_seconds,
+                max_messages=max_messages,
+                send_read_receipts=send_read_receipts,
+                ignore_attachments=ignore_attachments,
+            )
+        except TimeoutError:
+            return await self._receive_http(
+                timeout_seconds=timeout_seconds,
+                max_messages=max_messages,
+                send_read_receipts=send_read_receipts,
+                ignore_attachments=ignore_attachments,
+            )
+        except (OSError, WebSocketException) as exc:
+            raise SignalApiError(f"signal-cli-rest-api websocket receive failed: {exc}") from exc
+        return messages
+
+    async def _receive_http(
         self,
         *,
         timeout_seconds: int,
@@ -83,3 +137,23 @@ class SignalClient:
                 f"{response.status_code} {response.text}"
             )
         return response.content, response.headers.get("content-type")
+
+    def _receive_websocket_url(self) -> str:
+        parsed = urlparse(self.base_url)
+        if parsed.scheme == "https":
+            scheme = "wss"
+        elif parsed.scheme == "http":
+            scheme = "ws"
+        else:
+            raise SignalApiError(f"Unsupported Signal API URL scheme: {parsed.scheme}")
+        path = f"{parsed.path.rstrip('/')}/v1/receive/{self.number}"
+        return urlunparse((scheme, parsed.netloc, path, "", "", ""))
+
+
+def _decode_websocket_message(raw: str | bytes) -> Any:
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SignalApiError(f"signal-cli-rest-api receive returned non-JSON: {raw[:200]}") from exc

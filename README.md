@@ -7,7 +7,7 @@ processes them, and replies through the `/v2/send` endpoint.
 ## What it does
 
 - `POST /signal/webhook` accepts webhook-style payloads from `signal-cli-rest-api`.
-- Optional polling calls `GET /v1/receive/{number}` and processes received messages.
+- Optional polling opens `ws://.../v1/receive/{number}` and processes received messages.
 - Replies are sent with `POST /v2/send`.
 - Voice-message attachments are downloaded from `GET /v1/attachments/{id}`,
   converted to MP3 when needed, transcribed, and echoed back as transcript text.
