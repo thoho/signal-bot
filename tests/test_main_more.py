@@ -401,6 +401,49 @@ async def test_handle_payload_increments_replies_sent_on_success() -> None:
     assert sent == [("pong", ["+15551234567"])]
 
 
+@pytest.mark.asyncio
+async def test_handle_payload_drops_stale_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.main import handle_payload
+
+    sent: list[tuple[str, list[str]]] = []
+
+    class OkClient:
+        async def send_message(self, message: str, recipients: list[str]) -> dict:
+            sent.append((message, recipients))
+            return {}
+
+        async def get_attachment(self, _id):
+            raise AssertionError("not used")
+
+    class DummyTrans:
+        async def transcribe(self, *args, **kwargs): ...
+
+    monkeypatch.setattr("app.main.time.time", lambda: 1_710_000_600)
+
+    payload = [
+        {
+            "envelope": {
+                "sourceNumber": "+15551234567",
+                "timestamp": 1_710_000_000_000,
+                "dataMessage": {"message": "ping"},
+            }
+        }
+    ]
+
+    result = await handle_payload(
+        payload,
+        OkClient(),  # type: ignore[arg-type]
+        DummyTrans(),  # type: ignore[arg-type]
+        None,
+        max_message_age_seconds=300,
+    )
+
+    assert result == {"messages_received": 0, "replies_sent": 0}
+    assert sent == []
+
+
 def test_summarize_payload_handles_unjson_serializable_objects() -> None:
     from app.main import _summarize_payload
 

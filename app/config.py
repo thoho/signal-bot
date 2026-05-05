@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     poll_timeout_seconds: int = Field(default=30)
     poll_interval_seconds: float = Field(default=1.0)
     max_messages: int = Field(default=10)
+    max_message_age_seconds: int = Field(default=0, ge=0)
     send_read_receipts: bool = Field(default=True)
     ignore_attachments: bool = Field(default=False)
     transcription_api_url: str = Field(

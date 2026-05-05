@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -116,13 +117,26 @@ async def handle_payload(
     client: SignalClient,
     transcription_client: TranscriptionClient,
     master_client: MasterClient | None = None,
+    max_message_age_seconds: int = 0,
 ) -> dict[str, int]:
     messages = extract_messages(payload)
     replies_sent = 0
+    stale_count = 0
+
+    if max_message_age_seconds > 0:
+        fresh_messages = []
+        for message in messages:
+            if _is_stale_message(message, max_message_age_seconds):
+                stale_count += 1
+            else:
+                fresh_messages.append(message)
+        messages = fresh_messages
 
     if messages:
         logger.info("Received %s Signal message(s)", len(messages))
-    elif payload not in (None, []):
+    if stale_count:
+        logger.info("Dropped %s stale Signal message(s)", stale_count)
+    if not messages and not stale_count and payload not in (None, []):
         items = payload if isinstance(payload, list) else [payload]
         if items and all(is_known_non_message_envelope(i) for i in items):
             logger.debug("Skipped %s receipt/typing/call envelope(s)", len(items))
@@ -141,6 +155,16 @@ async def handle_payload(
 
     logger.info("Sent %s Signal reply/replies", replies_sent)
     return {"messages_received": len(messages), "replies_sent": replies_sent}
+
+
+def _is_stale_message(message: SignalMessage, max_age_seconds: int) -> bool:
+    if message.timestamp is None:
+        return False
+
+    timestamp_seconds = (
+        message.timestamp / 1000 if message.timestamp > 10_000_000_000 else message.timestamp
+    )
+    return time.time() - timestamp_seconds > max_age_seconds
 
 
 def _summarize_payload(payload: Any) -> str:
@@ -171,7 +195,13 @@ async def poll_signal(settings: Settings) -> None:
                 send_read_receipts=settings.send_read_receipts,
                 ignore_attachments=settings.ignore_attachments,
             )
-            await handle_payload(payload, client, transcription_client, master_client)
+            await handle_payload(
+                payload,
+                client,
+                transcription_client,
+                master_client,
+                settings.max_message_age_seconds,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -210,9 +240,16 @@ async def health() -> dict[str, str]:
 @app.post("/signal/webhook")
 async def signal_webhook(
     request: Request,
+    settings: Settings = Depends(get_settings),
     client: SignalClient = Depends(get_signal_client),
     transcription_client: TranscriptionClient = Depends(get_transcription_client),
     master_client: MasterClient = Depends(get_master_client),
 ) -> dict[str, int]:
     payload = await request.json()
-    return await handle_payload(payload, client, transcription_client, master_client)
+    return await handle_payload(
+        payload,
+        client,
+        transcription_client,
+        master_client,
+        settings.max_message_age_seconds,
+    )
