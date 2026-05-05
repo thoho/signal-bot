@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 
+from app._retry import retry_request
 from app.events import SignalMessage
 
 
@@ -10,10 +11,17 @@ class MasterClientError(RuntimeError):
 
 
 class MasterClient:
-    def __init__(self, base_url: str, enabled: bool, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        enabled: bool,
+        timeout_seconds: float = 30.0,
+        max_attempts: int = 3,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.enabled = enabled
         self.timeout_seconds = timeout_seconds
+        self.max_attempts = max_attempts
 
     async def send_signal_event(
         self,
@@ -38,7 +46,11 @@ class MasterClient:
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(f"{self.base_url}/v1/events/signal", json=payload)
+                response = await retry_request(
+                    lambda: client.post(f"{self.base_url}/v1/events/signal", json=payload),
+                    attempts=self.max_attempts,
+                    label="master /v1/events/signal",
+                )
         except httpx.HTTPError as exc:
             raise MasterClientError(f"Master orchestrator request failed: {exc}") from exc
 

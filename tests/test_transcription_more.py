@@ -100,6 +100,27 @@ async def test_transcription_client_raises_when_text_field_missing_or_blank() ->
 
 
 @pytest.mark.asyncio
+@respx.mock
+async def test_transcription_client_retries_503_then_succeeds() -> None:
+    respx.post("http://t.test/v1/audio/transcriptions").mock(
+        side_effect=[
+            httpx.Response(503, text="busy"),
+            httpx.Response(200, json={"text": "hello"}),
+        ]
+    )
+    client = TranscriptionClient(
+        "http://t.test/v1/audio/transcriptions",
+        api_key="k",
+        model="m",
+        task="transcribe",
+    )
+
+    result = await client.transcribe(b"audio", _attachment(), "audio/ogg")
+
+    assert result == "hello"
+
+
+@pytest.mark.asyncio
 async def test_prepare_audio_falls_back_when_ffmpeg_missing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

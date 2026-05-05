@@ -109,6 +109,38 @@ async def test_payload_includes_sender_text_transcript_and_metadata() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_send_signal_event_retries_503_then_succeeds() -> None:
+    respx.post("http://master.test/v1/events/signal").mock(
+        side_effect=[
+            httpx.Response(503, text="busy"),
+            httpx.Response(200, json={"reply": "ok"}),
+        ]
+    )
+    client = MasterClient("http://master.test", enabled=True)
+
+    reply = await client.send_signal_event(_message(), text="hi")
+
+    assert reply == "ok"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_signal_event_recovers_after_one_connect_error() -> None:
+    respx.post("http://master.test/v1/events/signal").mock(
+        side_effect=[
+            httpx.ConnectError("first fails"),
+            httpx.Response(200, json={"reply": "ok"}),
+        ]
+    )
+    client = MasterClient("http://master.test", enabled=True)
+
+    reply = await client.send_signal_event(_message(), text="hi")
+
+    assert reply == "ok"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_payload_omits_source_message_id_when_no_timestamp() -> None:
     captured: dict[str, object] = {}
 

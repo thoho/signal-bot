@@ -2,15 +2,18 @@ from typing import Any
 
 import httpx
 
+from app._retry import retry_request
+
 
 class SignalApiError(RuntimeError):
     pass
 
 
 class SignalClient:
-    def __init__(self, base_url: str, number: str) -> None:
+    def __init__(self, base_url: str, number: str, max_attempts: int = 3) -> None:
         self.base_url = base_url.rstrip("/")
         self.number = number
+        self.max_attempts = max_attempts
 
     async def send_message(self, message: str, recipients: list[str]) -> dict[str, Any]:
         payload = {
@@ -19,7 +22,11 @@ class SignalClient:
             "message": message,
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(f"{self.base_url}/v2/send", json=payload)
+            response = await retry_request(
+                lambda: client.post(f"{self.base_url}/v2/send", json=payload),
+                attempts=self.max_attempts,
+                label="signal-cli /v2/send",
+            )
         if response.is_error:
             raise SignalApiError(
                 f"signal-cli-rest-api send failed: {response.status_code} {response.text}"
@@ -65,7 +72,11 @@ class SignalClient:
 
     async def get_attachment(self, attachment_id: str) -> tuple[bytes, str | None]:
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.get(f"{self.base_url}/v1/attachments/{attachment_id}")
+            response = await retry_request(
+                lambda: client.get(f"{self.base_url}/v1/attachments/{attachment_id}"),
+                attempts=self.max_attempts,
+                label="signal-cli /v1/attachments",
+            )
         if response.is_error:
             raise SignalApiError(
                 "signal-cli-rest-api attachment download failed: "

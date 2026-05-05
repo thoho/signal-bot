@@ -139,3 +139,36 @@ async def test_get_attachment_raises_on_5xx() -> None:
 
     with pytest.raises(SignalApiError, match="attachment download failed"):
         await _client().get_attachment("abc")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_message_retries_503_then_succeeds() -> None:
+    respx.post("http://signal.test/v2/send").mock(
+        side_effect=[
+            httpx.Response(503, text="busy"),
+            httpx.Response(200, json={"ok": True}),
+        ]
+    )
+
+    body = await _client().send_message("hi", ["+1"])
+
+    assert body == {"ok": True}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_attachment_recovers_after_one_connect_error() -> None:
+    respx.get("http://signal.test/v1/attachments/abc").mock(
+        side_effect=[
+            httpx.ConnectError("first fails"),
+            httpx.Response(
+                200, content=b"audio", headers={"content-type": "audio/ogg"}
+            ),
+        ]
+    )
+
+    body, content_type = await _client().get_attachment("abc")
+
+    assert body == b"audio"
+    assert content_type == "audio/ogg"

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from app._retry import retry_request
 from app.events import SignalAttachment
 
 logger = logging.getLogger(__name__)
@@ -16,11 +17,20 @@ class TranscriptionError(RuntimeError):
 
 
 class TranscriptionClient:
-    def __init__(self, api_url: str, api_key: str, model: str, task: str) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        task: str,
+        max_attempts: int = 2,
+    ) -> None:
         self.api_url = api_url
         self.api_key = api_key
         self.model = model
         self.task = task
+        # Audio uploads are heavy, so retry sparingly: 1 retry by default.
+        self.max_attempts = max_attempts
 
     async def transcribe(
         self,
@@ -41,11 +51,15 @@ class TranscriptionClient:
         data = {"model": self.model, "task": self.task}
 
         async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                self.api_url,
-                headers=headers,
-                data=data,
-                files=files,
+            response = await retry_request(
+                lambda: client.post(
+                    self.api_url,
+                    headers=headers,
+                    data=data,
+                    files=files,
+                ),
+                attempts=self.max_attempts,
+                label="transcription",
             )
 
         if response.is_error:
